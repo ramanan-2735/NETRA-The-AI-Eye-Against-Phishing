@@ -95,6 +95,50 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Rate Limiting (20 requests per minute per client IP)
+# ---------------------------------------------------------------------------
+from collections import defaultdict
+
+_rate_limits = defaultdict(list)
+RATE_LIMIT_PER_MINUTE = 20
+RATE_LIMIT_WINDOW_SECONDS = 60
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Apply rate limiting to inference endpoint (/predict)
+    if request.url.path in ["/predict"]:
+        # Cloud Run / Proxy support: inspect X-Forwarded-For
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
+
+        now = time.time()
+        window_start = now - RATE_LIMIT_WINDOW_SECONDS
+
+        # Prune older timestamps
+        timestamps = [t for t in _rate_limits[client_ip] if t > window_start]
+        if len(timestamps) >= RATE_LIMIT_PER_MINUTE:
+            retry_after = int(RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0])) + 1
+            log.warning(f"Rate limit exceeded for IP: {client_ip} ({len(timestamps)} reqs in window)")
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "rate_limit_exceeded",
+                    "message": f"Rate limit exceeded. Maximum {RATE_LIMIT_PER_MINUTE} requests per minute allowed.",
+                    "retry_after_seconds": max(retry_after, 1),
+                },
+                headers={"Retry-After": str(max(retry_after, 1))},
+            )
+
+        timestamps.append(now)
+        _rate_limits[client_ip] = timestamps
+
+    response = await call_next(request)
+    return response
+
+# ---------------------------------------------------------------------------
 # Global model state
 # ---------------------------------------------------------------------------
 class ModelState:
