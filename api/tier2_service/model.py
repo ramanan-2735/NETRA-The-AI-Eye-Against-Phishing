@@ -61,8 +61,15 @@ class Tier2Model:
         tok_path    = self.model_dir / "roberta_tier2_tokenizer"
 
         if not model_path.exists():
-            log.error(f"Model weights not found: {model_path}")
-            return False
+            log.info("roberta_tier2.pt not found locally. Auto-downloading from GitHub Release (v3.0.0)...")
+            try:
+                import urllib.request
+                RELEASE_URL = "https://github.com/ramanan-2735/NETRA-The-AI-Eye-Against-Phishing/releases/download/v3.0.0/roberta_tier2.pt"
+                urllib.request.urlretrieve(RELEASE_URL, str(model_path))
+                log.info("roberta_tier2.pt downloaded successfully from GitHub Release!")
+            except Exception as e:
+                log.error(f"Failed to auto-download roberta_tier2.pt from GitHub: {e}")
+                return False
 
         log.info("Loading Tier-2 RoBERTa model...")
 
